@@ -288,40 +288,40 @@ TONE GUIDELINES:
 Remember: Quality over quantity. Give the right amount of information for each query type.`;
 };
 
+
 const ChatController = async (req, res) => {
     const { message } = req.body;
-    
+
     if (!message || typeof message !== 'string') {
         return res.status(400).json({ error: 'Invalid message format' });
     }
 
     try {
         const openRouterApiKey = process.env.OpenRouter_APIKEY;
-        
-        // Analyze the query to determine response style and length
+        if (!openRouterApiKey) {
+            return res.status(500).json({ error: 'Missing OpenRouter API key in environment' });
+        }
+
+        // Analyze and prepare your query (from your existing functions)
         const queryAnalysis = analyzeQueryType(message);
-        
-        // Check if the message is dental-related
         const isDental = isDentalRelated(message);
-        
-        // Get relevant dental information
         const relevantInfo = getRelevantDentalInfo(message);
-        
-        // Create enhanced system prompt
         const systemPrompt = createDentalSystemPrompt(queryAnalysis, relevantInfo);
-        
+
+        console.time("openrouter"); // Start timer
+
         const response = await axios.post(
             'https://openrouter.ai/api/v1/chat/completions',
             {
-                model: 'deepseek/deepseek-r1-0528:free',
+                model: 'mistralai/mistral-7b-instruct:free', // Faster free model
                 messages: [
                     { role: 'system', content: systemPrompt },
                     { role: 'user', content: message }
                 ],
-                temperature: 0.6, // Slightly lower for more consistent responses
-                max_tokens: queryAnalysis.maxTokens, // Dynamic token limit
+                temperature: 0.6,
+                max_tokens: Math.min(queryAnalysis.maxTokens, 400), // Limit for performance
                 top_p: 0.9,
-                frequency_penalty: 0.1 // Reduce repetitive responses
+                frequency_penalty: 0.1
             },
             {
                 headers: {
@@ -329,26 +329,29 @@ const ChatController = async (req, res) => {
                     'Content-Type': 'application/json',
                     'HTTP-Referer': DENTAL_CONTEXT.practice.website,
                     'X-Title': DENTAL_CONTEXT.practice.name
-                }
+                },
+                timeout: 15000 // 15 seconds timeout
             }
         );
+
+        console.timeEnd("openrouter"); // End timer
 
         res.status(200).json({
             message: response.data.choices[0].message.content,
             provider: 'openrouter',
-            model: 'deepseek/deepseek-r1-0528:free',
+            model: 'mistralai/mistral-7b-instruct:free',
             context: 'dental_assistant',
-            practice: DENTAL_CONTEXT.practice.name,
             queryType: queryAnalysis.category,
             responseStyle: queryAnalysis.responseStyle,
             maxTokens: queryAnalysis.maxTokens
         });
-        
+
     } catch (error) {
-        console.error('Error with OpenRouter API:', error.response?.data || error.message);
+        console.error('OpenRouter Error:', error.message || error);
+
         res.status(500).json({
-            error: 'Failed to get response from dental AI assistant',
-            details: error.response?.data || error.message
+            error: 'The AI assistant is currently unavailable. Please try again in a moment.',
+            techDetails: error.response?.data || error.message
         });
     }
 };
